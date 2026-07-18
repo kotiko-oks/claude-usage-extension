@@ -343,15 +343,73 @@
     return true;
   }
 
+  function injectInputBarDocks() {
+    // 1. Right of attach button (after div.relative.shrink-0 wrapping it)
+    if (!document.getElementById('cuw-dock-input-attach')) {
+      const attachBtn = document.querySelector('[aria-label="Add files, connectors, and more"]');
+      if (!attachBtn) return false;
+      const attachWrapper = attachBtn.parentElement && attachBtn.parentElement.parentElement;
+      if (!attachWrapper) return false;
+      const el = makeDockEl('cuw-dock-input-attach', 'dot');
+      el.title = 'Перетащите виджет сюда';
+      attachWrapper.insertAdjacentElement('afterend', el);
+      allDockEls.push(el);
+      tryRestoreDock(el);
+    } else {
+      const ex = document.getElementById('cuw-dock-input-attach');
+      if (!allDockEls.includes(ex)) allDockEls.push(ex);
+    }
+
+    // 2. Left of model selector container (before the flex wrapper holding model button)
+    if (!document.getElementById('cuw-dock-input-model')) {
+      const modelBtn = document.querySelector('[data-testid="model-selector-dropdown"]');
+      if (!modelBtn) return false;
+      // button → div.overflow-hidden → span.inline-flex → div.flex.items-center.gap-2
+      const modelContainer = modelBtn.parentElement &&
+                             modelBtn.parentElement.parentElement &&
+                             modelBtn.parentElement.parentElement.parentElement;
+      if (!modelContainer) return false;
+      const el = makeDockEl('cuw-dock-input-model', 'dot');
+      el.title = 'Перетащите виджет сюда';
+      modelContainer.insertAdjacentElement('beforebegin', el);
+      allDockEls.push(el);
+      tryRestoreDock(el);
+    } else {
+      const ex = document.getElementById('cuw-dock-input-model');
+      if (!allDockEls.includes(ex)) allDockEls.push(ex);
+    }
+
+    // 3. Left of recording/settings area (before div.shrink-0 wrapping them)
+    if (!document.getElementById('cuw-dock-input-record')) {
+      const recordBtn = document.querySelector('[aria-label="Press and hold to record"]');
+      if (!recordBtn) return false;
+      // button → div.flex.items-center.rounded-lg → div.shrink-0
+      const recordWrapper = recordBtn.parentElement && recordBtn.parentElement.parentElement;
+      if (!recordWrapper) return false;
+      const el = makeDockEl('cuw-dock-input-record', 'dot');
+      el.title = 'Перетащите виджет сюда';
+      recordWrapper.insertAdjacentElement('beforebegin', el);
+      allDockEls.push(el);
+      tryRestoreDock(el);
+    } else {
+      const ex = document.getElementById('cuw-dock-input-record');
+      if (!allDockEls.includes(ex)) allDockEls.push(ex);
+    }
+
+    return true;
+  }
+
   function tryInjectAll(attempt) {
     attempt = attempt || 0;
     injectSidebarDock();
     injectChatDocks();
+    injectInputBarDocks();
     // Retry a few times for lazy-rendered elements
     if (attempt < 20) {
-      const needSidebar = !document.getElementById('cuw-dock-sidebar');
-      const needChat    = !document.getElementById('cuw-dock-chat-left');
-      if (needSidebar || needChat) {
+      const needSidebar   = !document.getElementById('cuw-dock-sidebar');
+      const needChat      = !document.getElementById('cuw-dock-chat-left');
+      const needInputBar  = !document.getElementById('cuw-dock-input-attach');
+      if (needSidebar || needChat || needInputBar) {
         setTimeout(function () { tryInjectAll(attempt + 1); }, 500);
       }
     }
