@@ -158,7 +158,18 @@
         </div>`;
       widgetEl.querySelector('.cuw-refresh-mini').addEventListener('click', function () { loadData(true); });
       widgetEl.querySelectorAll('[data-mode]').forEach(function (btn) {
-        btn.addEventListener('click', function () { setMode(btn.dataset.mode); });
+        btn.addEventListener('click', function () {
+          if (isDocked && btn.dataset.mode === 'full') {
+            // Expand button while docked: fly out of the slot then open full
+            const dr = activeDockEl ? activeDockEl.getBoundingClientRect() : null;
+            const tx = dr ? Math.min(dr.right + 16, window.innerWidth - 240) : window.innerWidth - 240;
+            const ty = dr ? Math.max(8, dr.top - 80) : window.innerHeight - 200;
+            undockWidget(tx, ty);
+            setMode('full');
+          } else {
+            setMode(btn.dataset.mode);
+          }
+        });
       });
       makeDraggable(widgetEl, '.cuw-mini-inner');
       return;
@@ -411,7 +422,10 @@
     if (!isDocked) handle.style.cursor = 'grab';
 
     const handler = function (e) {
-      if (e.target.tagName === 'BUTTON' && !isDocked) return;
+      // Skip buttons when there's a specific drag handle (mini/full mode) — let them fire normally.
+      // In dot mode (handleSelector=null) we have no separate handle, so buttons go through
+      // drag logic and are handled manually in onUp (click-without-drag → undock/expand).
+      if (e.target.tagName === 'BUTTON' && handleSelector) return;
       e.preventDefault();
 
       const wasDocked  = isDocked;
@@ -474,7 +488,10 @@
 
         if (!dragStarted) {
           // Click without drag
-          if (wasDocked) {
+          if (wasDocked && currentMode === 'dot') {
+            // Docked dot: just refresh data, don't undock
+            loadData(true);
+          } else if (wasDocked) {
             const dr = prevDockEl ? prevDockEl.getBoundingClientRect() : null;
             const tx = dr ? Math.min(dr.right + 16, window.innerWidth - 240) : window.innerWidth - 240;
             const ty = dr ? Math.max(8, dr.top - 80) : window.innerHeight - 200;
