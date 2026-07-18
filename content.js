@@ -2,9 +2,9 @@
   'use strict';
 
   const REFRESH_INTERVAL = 60 * 1000;
-  const MODES      = ['full', 'mini', 'dot'];
+  const MODES       = ['full', 'mini', 'dot'];
   const STORAGE_KEY = 'cuw_mode';
-  const DOCK_KEY    = 'cuw_docked';
+  const DOCK_KEY    = 'cuw_dock_slot'; // stores slot id of active dock, or nothing
   const POS_KEY     = 'cuw_pos';
 
   let widgetEl     = null;
@@ -13,18 +13,17 @@
   let lastData     = null;
   let currentMode  = 'full';
   let isDocked     = false;
-  let dockTargetEl = null;
+  let activeDockEl = null;   // the dock target el the widget currently lives in
+  let allDockEls   = [];     // all injected dock target elements
   let isDragging   = false;
 
-  // Stores the widget-level mousedown handler so we can remove it before adding a new one.
-  // Prevents accumulation of stale listeners when switching to/from dot mode.
   let _widgetDragHandler = null;
 
   /* ── theme ── */
 
   function detectTheme() {
-    const cookieM = document.cookie.match(/CH-prefers-color-scheme=(light|dark)/);
-    if (cookieM) return cookieM[1];
+    const cm = document.cookie.match(/CH-prefers-color-scheme=(light|dark)/);
+    if (cm) return cm[1];
     const html = document.documentElement;
     if (html.classList.contains('dark'))  return 'dark';
     if (html.classList.contains('light')) return 'light';
@@ -43,7 +42,7 @@
     if (!widgetEl) return;
     const theme = detectTheme();
     widgetEl.setAttribute('data-cuw-theme', theme);
-    if (dockTargetEl) dockTargetEl.setAttribute('data-cuw-theme', theme);
+    allDockEls.forEach(function (el) { el.setAttribute('data-cuw-theme', theme); });
   }
 
   /* ── helpers ── */
@@ -88,7 +87,6 @@
     currentMode = mode;
     try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
     renderWidget();
-    // Snap to nearest edge after resize — skip during drag or when docked
     if (!isDocked && !isDragging) {
       setTimeout(function () {
         if (!widgetEl || isDragging || isDocked) return;
@@ -119,7 +117,6 @@
       const R   = 17;
       const C   = 2 * Math.PI * R;
       const off = C - (pct / 100) * C;
-      // Smaller SVG when embedded in the sidebar
       const svgSize = isDocked ? 28 : 44;
       const tip = isDocked
         ? `Нажмите — открыть · Тяните — вытащить (${pct}%, осталось ${timeLeft})`
@@ -135,8 +132,6 @@
             <text x="22" y="26" class="cuw-ring-text">${pct}%</text>
           </svg>
         </button>`;
-      // Non-docked: button-element click (the 2px border ring) expands the widget.
-      // SVG-element click and docked-click are handled by the drag handler's mouseup.
       if (!isDocked) {
         widgetEl.querySelector('.cuw-dot-btn').addEventListener('click', function () {
           setMode('full');
@@ -250,73 +245,141 @@
 
   /* ── dock ── */
 
-  function injectDockTarget() {
-    if (document.getElementById('cuw-dock-target')) {
-      dockTargetEl = document.getElementById('cuw-dock-target');
-      return true;
-    }
+  function makeDockEl(id, mode) {
+    const el = document.createElement('div');
+    el.id = id;
+    el.dataset.cuwDockMode = mode;
+    el.setAttribute('data-cuw-theme', detectTheme());
+    if (mode === 'mini') el.classList.add('cuw-dock-mini');
+    return el;
+  }
 
-    // The button sits inside: div.relative.overflow-visible → flex-row (gap-2 etc.)
-    const appsBtn   = document.querySelector('[aria-label="Get apps and extensions"]');
-    if (!appsBtn) return false;
-    const btnWrapper = appsBtn.parentElement;          // div.relative.overflow-visible
-    const flexRow    = btnWrapper && btnWrapper.parentElement; // the flex row
-    if (!flexRow) return false;
-
-    dockTargetEl = document.createElement('div');
-    dockTargetEl.id    = 'cuw-dock-target';
-    dockTargetEl.title = 'Перетащите виджет сюда чтобы встроить';
-    dockTargetEl.setAttribute('data-cuw-theme', detectTheme());
-    flexRow.insertBefore(dockTargetEl, btnWrapper);
-
-    // Restore dock state that was saved before SPA navigation
+  // Restore saved dock after injection
+  function tryRestoreDock(el) {
     try {
-      if (localStorage.getItem(DOCK_KEY) === '1' && !isDocked && widgetEl) {
-        dockWidget();
+      if (localStorage.getItem(DOCK_KEY) === el.id && !isDocked && widgetEl) {
+        dockWidget(el);
       }
     } catch (_) {}
+  }
+
+  function injectSidebarDock() {
+    if (document.getElementById('cuw-dock-sidebar')) {
+      const existing = document.getElementById('cuw-dock-sidebar');
+      if (!allDockEls.includes(existing)) allDockEls.push(existing);
+      return true;
+    }
+    const appsBtn   = document.querySelector('[aria-label="Get apps and extensions"]');
+    if (!appsBtn) return false;
+    const btnWrapper = appsBtn.parentElement;
+    const flexRow    = btnWrapper && btnWrapper.parentElement;
+    if (!flexRow) return false;
+
+    const el = makeDockEl('cuw-dock-sidebar', 'dot');
+    el.title = 'Перетащите виджет сюда';
+    flexRow.insertBefore(el, btnWrapper);
+    allDockEls.push(el);
+    tryRestoreDock(el);
+    return true;
+  }
+
+  function injectChatDocks() {
+    const wiggleDiv = document.querySelector('[data-testid="wiggle-controls-actions"]');
+    if (!wiggleDiv) return false;
+
+    // Left dot — first child of wiggleDiv
+    if (!document.getElementById('cuw-dock-chat-left')) {
+      const el = makeDockEl('cuw-dock-chat-left', 'dot');
+      el.title = 'Перетащите виджет сюда (точка)';
+      wiggleDiv.prepend(el);
+      allDockEls.push(el);
+      tryRestoreDock(el);
+    } else {
+      const ex = document.getElementById('cuw-dock-chat-left');
+      if (!allDockEls.includes(ex)) allDockEls.push(ex);
+    }
+
+    // Right dot — last child of wiggleDiv
+    if (!document.getElementById('cuw-dock-chat-right')) {
+      const el = makeDockEl('cuw-dock-chat-right', 'dot');
+      el.title = 'Перетащите виджет сюда (точка)';
+      wiggleDiv.append(el);
+      allDockEls.push(el);
+      tryRestoreDock(el);
+    } else {
+      const ex = document.getElementById('cuw-dock-chat-right');
+      if (!allDockEls.includes(ex)) allDockEls.push(ex);
+    }
+
+    // Mini strip — absolutely positioned below wiggleDiv inside its parent
+    if (!document.getElementById('cuw-dock-chat-mini')) {
+      const parent = wiggleDiv.parentElement;
+      if (!parent) return true; // dots are done at least
+      const el = makeDockEl('cuw-dock-chat-mini', 'mini');
+      el.title = 'Перетащите виджет сюда (мини)';
+      // wiggleDiv is md:absolute md:top-0; h-12 = 48px, so top:48px places us right below
+      el.style.cssText = 'position:absolute;top:48px;right:0;';
+      // ensure parent is a positioned container
+      if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+      parent.appendChild(el);
+      allDockEls.push(el);
+      tryRestoreDock(el);
+    } else {
+      const ex = document.getElementById('cuw-dock-chat-mini');
+      if (!allDockEls.includes(ex)) allDockEls.push(ex);
+    }
 
     return true;
   }
 
-  function tryInjectDockTarget(attempt) {
+  function tryInjectAll(attempt) {
     attempt = attempt || 0;
-    if (!injectDockTarget() && attempt < 20) {
-      setTimeout(function () { tryInjectDockTarget(attempt + 1); }, 500);
+    injectSidebarDock();
+    injectChatDocks();
+    // Retry a few times for lazy-rendered elements
+    if (attempt < 20) {
+      const needSidebar = !document.getElementById('cuw-dock-sidebar');
+      const needChat    = !document.getElementById('cuw-dock-chat-left');
+      if (needSidebar || needChat) {
+        setTimeout(function () { tryInjectAll(attempt + 1); }, 500);
+      }
     }
   }
 
-  function dockWidget() {
-    if (!dockTargetEl || !widgetEl) return;
-    isDocked = true;
-    try { localStorage.setItem(DOCK_KEY, '1'); } catch (_) {}
-    // Clear all inline position styles so CSS can take over (position: static !important)
+  function dockWidget(targetEl) {
+    if (!targetEl || !widgetEl) return;
+    activeDockEl = targetEl;
+    isDocked     = true;
+    const mode   = targetEl.dataset.cuwDockMode || 'dot';
+    try { localStorage.setItem(DOCK_KEY, targetEl.id); } catch (_) {}
     widgetEl.style.position = '';
     widgetEl.style.left     = '';
     widgetEl.style.right    = '';
     widgetEl.style.top      = '';
     widgetEl.style.bottom   = '';
     widgetEl.setAttribute('data-cuw-docked', 'true');
-    dockTargetEl.appendChild(widgetEl);
-    dockTargetEl.classList.remove('cuw-dock-dragging', 'cuw-dock-active', 'cuw-dock-hover');
-    dockTargetEl.classList.add('cuw-dock-occupied');
-    setMode('dot'); // always dock as dot; re-renders with isDocked=true (28px SVG)
+    widgetEl.setAttribute('data-cuw-dock-mode', mode);
+    targetEl.appendChild(widgetEl);
+    targetEl.classList.remove('cuw-dock-dragging', 'cuw-dock-active', 'cuw-dock-hover');
+    targetEl.classList.add('cuw-dock-occupied');
+    setMode(mode);
   }
 
   function undockWidget(targetX, targetY) {
     if (!widgetEl) return;
-    isDocked = false;
+    if (activeDockEl) activeDockEl.classList.remove('cuw-dock-occupied');
+    activeDockEl = null;
+    isDocked     = false;
     try { localStorage.removeItem(DOCK_KEY); } catch (_) {}
     widgetEl.removeAttribute('data-cuw-docked');
+    widgetEl.removeAttribute('data-cuw-dock-mode');
     document.body.appendChild(widgetEl);
-    if (dockTargetEl) dockTargetEl.classList.remove('cuw-dock-occupied');
     const x = (targetX !== null && targetX !== undefined) ? targetX : window.innerWidth - 80;
     const y = (targetY !== null && targetY !== undefined) ? targetY : window.innerHeight - 80;
     applyEdgePosition(widgetEl, x, y);
-    // Caller is responsible for rendering/mode changes after undocking
   }
 
-  /* ── drag (edge-anchored + dock support) ── */
+  /* ── drag ── */
 
   function applyEdgePosition(el, left, top) {
     const vw = window.innerWidth;
@@ -337,8 +400,6 @@
   let resizeListenerAdded = false;
 
   function makeDraggable(el, handleSelector) {
-    // Always remove the previous widget-level handler to prevent listener accumulation.
-    // Handlers on child elements (.cuw-header, .cuw-mini-inner) auto-clean when innerHTML is replaced.
     if (_widgetDragHandler) {
       el.removeEventListener('mousedown', _widgetDragHandler);
       _widgetDragHandler = null;
@@ -350,37 +411,33 @@
     if (!isDocked) handle.style.cursor = 'grab';
 
     const handler = function (e) {
-      // Non-docked: if the click lands directly on a BUTTON element, let its own
-      // click handler fire (e.g. ◉ mode buttons, ↻ refresh). Drag is on non-button areas.
       if (e.target.tagName === 'BUTTON' && !isDocked) return;
-
-      // preventDefault suppresses text-selection and (in Chrome/Firefox) the subsequent
-      // click event — so manual action on mouseup is needed for click-without-drag.
       e.preventDefault();
 
-      const wasDocked = isDocked;
-      const mX = e.clientX; // position at mousedown
+      const wasDocked  = isDocked;
+      const prevDockEl = activeDockEl;
+      const mX = e.clientX;
       const mY = e.clientY;
 
-      let dragStarted = false;
+      let dragStarted  = false;
       let ox = 0, oy = 0;
       let dragRefX = mX;
       let dragRefY = mY;
+      let hoveredDockEl = null;
 
       function onMove(ev) {
-        // Threshold of 4 px to distinguish click from drag
         if (!dragStarted && (Math.abs(ev.clientX - mX) > 4 || Math.abs(ev.clientY - mY) > 4)) {
           dragStarted = true;
           isDragging  = true;
 
-          // Step 1: undock if needed. Docked is always 28px dot → re-render to 44px floating dot.
+          // When undocking from a docked state: restore the mode it was docked in
           if (wasDocked) {
+            const dockMode = prevDockEl ? (prevDockEl.dataset.cuwDockMode || 'dot') : 'dot';
             undockWidget(mX - 24, mY - 24);
-            setMode('dot'); // re-renders at floating 44px size, positions near cursor
+            setMode(dockMode); // dot→floating dot (44px), mini→floating mini
           }
-          // Non-docked: widget stays in its current mode (full/mini/dot) during drag.
+          // Non-docked: stay in current mode during drag
 
-          // Step 2: capture reference position for subsequent move calculations.
           const rect = el.getBoundingClientRect();
           ox       = rect.left;
           oy       = rect.top;
@@ -388,18 +445,23 @@
           dragRefY = mY;
 
           document.body.style.cursor = 'grabbing';
-          // cuw-dock-dragging makes the slot visible; cuw-dock-active highlights it.
-          if (dockTargetEl) dockTargetEl.classList.add('cuw-dock-dragging', 'cuw-dock-active');
+          allDockEls.forEach(function (d) { d.classList.add('cuw-dock-dragging', 'cuw-dock-active'); });
         }
 
         if (dragStarted) {
           applyEdgePosition(el, ox + ev.clientX - dragRefX, oy + ev.clientY - dragRefY);
 
-          if (dockTargetEl) {
-            const dr   = dockTargetEl.getBoundingClientRect();
-            const over = ev.clientX >= dr.left && ev.clientX <= dr.right
-                      && ev.clientY >= dr.top  && ev.clientY <= dr.bottom;
-            dockTargetEl.classList.toggle('cuw-dock-hover', over);
+          // Hover detection across all dock targets
+          let newHovered = null;
+          allDockEls.forEach(function (d) {
+            const dr = d.getBoundingClientRect();
+            if (ev.clientX >= dr.left && ev.clientX <= dr.right &&
+                ev.clientY >= dr.top  && ev.clientY <= dr.bottom) newHovered = d;
+          });
+          if (newHovered !== hoveredDockEl) {
+            if (hoveredDockEl) hoveredDockEl.classList.remove('cuw-dock-hover');
+            hoveredDockEl = newHovered;
+            if (hoveredDockEl) hoveredDockEl.classList.add('cuw-dock-hover');
           }
         }
       }
@@ -411,31 +473,39 @@
         isDragging = false;
 
         if (!dragStarted) {
-          // ── Click without drag ──
+          // Click without drag
           if (wasDocked) {
-            // Position full widget to the right of the sidebar dock zone
-            const dr = dockTargetEl ? dockTargetEl.getBoundingClientRect() : null;
+            const dr = prevDockEl ? prevDockEl.getBoundingClientRect() : null;
             const tx = dr ? Math.min(dr.right + 16, window.innerWidth - 240) : window.innerWidth - 240;
             const ty = dr ? Math.max(8, dr.top - 80) : window.innerHeight - 200;
             undockWidget(tx, ty);
             setMode('full');
           } else if (currentMode === 'dot') {
-            // Non-docked dot: SVG-area click (button-element clicks are handled by the button's listener)
             setMode('full');
           }
           return;
         }
 
-        // ── Drag ended — check if dropped on dock zone ──
-        if (dockTargetEl) {
-          const dr   = dockTargetEl.getBoundingClientRect();
-          const over = ev.clientX >= dr.left && ev.clientX <= dr.right
-                    && ev.clientY >= dr.top  && ev.clientY <= dr.bottom;
-          dockTargetEl.classList.remove('cuw-dock-dragging', 'cuw-dock-active', 'cuw-dock-hover');
-          if (over) { dockWidget(); return; }
+        // Find drop target FIRST — elements must still be visible (display:inline-flex via cuw-dock-dragging)
+        // for getBoundingClientRect() to return real coordinates. Removing cuw-dock-dragging first
+        // causes display:none → all rects become zero → drop never registers.
+        const dropTarget = allDockEls.find(function (d) {
+          const dr = d.getBoundingClientRect();
+          return ev.clientX >= dr.left && ev.clientX <= dr.right &&
+                 ev.clientY >= dr.top  && ev.clientY <= dr.bottom;
+        });
+
+        // THEN clean up dock highlights
+        allDockEls.forEach(function (d) {
+          d.classList.remove('cuw-dock-dragging', 'cuw-dock-active', 'cuw-dock-hover');
+        });
+
+        if (dropTarget) {
+          dockWidget(dropTarget);
+        } else {
+          // Stays floating in current mode — save position
+          try { localStorage.setItem(POS_KEY, JSON.stringify({l: el.style.left, r: el.style.right, t: el.style.top, b: el.style.bottom})); } catch(_) {}
         }
-        // Dropped elsewhere — widget stays in its current mode
-        try { localStorage.setItem(POS_KEY, JSON.stringify({l: widgetEl.style.left, r: widgetEl.style.right, t: widgetEl.style.top, b: widgetEl.style.bottom})); } catch(_) {}
       }
 
       document.addEventListener('mousemove', onMove);
@@ -444,7 +514,6 @@
 
     handle.addEventListener('mousedown', handler);
 
-    // Remember widget-level handler for cleanup on the next makeDraggable call
     if (!handleSelector) {
       _widgetDragHandler = handler;
     }
@@ -475,16 +544,16 @@
     widgetEl = document.createElement('div');
     widgetEl.id = 'claude-usage-widget';
     document.body.appendChild(widgetEl);
+
+    // Restore saved floating position
     try {
       const pos = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
       if (pos) { widgetEl.style.left = pos.l; widgetEl.style.right = pos.r; widgetEl.style.top = pos.t; widgetEl.style.bottom = pos.b; }
-    } catch(_) {}
+    } catch (_) {}
 
     renderWidget();
     loadData();
-
-    // Try to inject dock target immediately; retries up to 10 s for lazy sidebar render
-    tryInjectDockTarget();
+    tryInjectAll();
 
     new MutationObserver(applyTheme).observe(document.documentElement, {
       attributes: true, attributeFilter: ['class', 'data-color-scheme', 'data-theme']
@@ -500,37 +569,39 @@
   // SPA navigation + dock target resurrection
   let lastUrl = location.href;
   new MutationObserver(function () {
-    // Re-inject whenever the dock target is removed (e.g. nav sidebar re-render on toggle).
-    // Setting dockTargetEl = null immediately prevents re-entry on the same wave of mutations.
-    if (dockTargetEl && !document.contains(dockTargetEl)) {
-      dockTargetEl = null;
-      tryInjectDockTarget();
+    // Detect removed dock targets and re-inject
+    const missing = allDockEls.filter(function (d) { return !document.contains(d); });
+    if (missing.length) {
+      // If widget was inside a removed dock, rescue it first
+      if (missing.includes(activeDockEl) && widgetEl) {
+        document.body.appendChild(widgetEl);
+        widgetEl.removeAttribute('data-cuw-docked');
+        widgetEl.removeAttribute('data-cuw-dock-mode');
+        activeDockEl = null;
+        isDocked     = false;
+        try { localStorage.removeItem(DOCK_KEY); } catch (_) {}
+        applyEdgePosition(widgetEl, window.innerWidth - 80, window.innerHeight - 80);
+        renderWidget();
+      }
+      allDockEls = allDockEls.filter(function (d) { return document.contains(d); });
+      tryInjectAll();
     }
 
+    // SPA navigation
     if (location.href === lastUrl) return;
     lastUrl = location.href;
     setTimeout(function () {
       currentOrgId = getOrgId();
-
-      // If dock target was destroyed by SPA navigation while widget was docked,
-      // rescue the widget back to the floating layer before it's lost
-      if (isDocked && !document.getElementById('cuw-dock-target')) {
-        if (widgetEl) {
-          document.body.appendChild(widgetEl);
-          widgetEl.removeAttribute('data-cuw-docked');
-          isDocked = false;
-          applyEdgePosition(widgetEl, window.innerWidth - 80, window.innerHeight - 80);
-          renderWidget();
-        }
-      }
-
       if (!document.getElementById('claude-usage-widget')) {
         widgetEl = null;
         _widgetDragHandler = null;
+        allDockEls = [];
+        activeDockEl = null;
+        isDocked = false;
         init();
       } else {
         loadData();
-        tryInjectDockTarget();
+        tryInjectAll();
       }
     }, 800);
   }).observe(document.body, { childList: true, subtree: true });

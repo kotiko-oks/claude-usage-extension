@@ -239,38 +239,41 @@
   dominant-baseline: auto;
 }
 
-/* ════════════════ DOCK TARGET ════════════════ */
+
+/* ════════════════ DOCK TARGETS (all slots) ════════════════ */
 
 /*
-  Injected next to the "Get apps and extensions" button in the sidebar flex row.
-  Hidden by default; appears only when the user is dragging the widget (.cuw-dock-dragging)
-  or when the widget is embedded inside it (.cuw-dock-occupied).
+  Each dock slot is a div injected near UI controls.
+  Hidden by default; appears only while dragging or when occupied.
 */
-#cuw-dock-target {
-  display: none; /* invisible until needed */
+[id^="cuw-dock-"] {
+  display: none;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
   box-sizing: border-box;
   flex-shrink: 0;
+  border-radius: 8px;
   border: 1.5px dashed rgba(128, 128, 128, 0.22);
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
 }
 
-/* Show when drag is in progress */
-#cuw-dock-target.cuw-dock-dragging {
-  display: inline-flex;
+/* ── dot-sized slots (sidebar, chat-left, chat-right) ── */
+#cuw-dock-sidebar,
+#cuw-dock-chat-left,
+#cuw-dock-chat-right {
+  width: 32px;
+  height: 32px;
 }
 
-/* Show when the widget lives inside (occupied state overrides display below) */
-#cuw-dock-target.cuw-dock-occupied {
-  display: inline-flex;
+/* ── mini slot (chat-mini strip below controls) ── */
+#cuw-dock-chat-mini {
+  width: 190px;
+  height: 48px;
+  border-radius: 8px;
 }
 
-/* Tiny ring hint inside the empty slot */
-#cuw-dock-target:not(.cuw-dock-occupied)::before {
+/* Tiny hint circle inside empty dot slots */
+[id^="cuw-dock-"]:not(.cuw-dock-occupied):not(.cuw-dock-mini)::before {
   content: '';
   display: block;
   width: 9px;
@@ -281,51 +284,67 @@
   transition: opacity 0.2s, border-color 0.2s;
 }
 
-/* Theme variants */
-#cuw-dock-target[data-cuw-theme="dark"] {
+/* Horizontal dash hint inside empty mini slot */
+#cuw-dock-chat-mini:not(.cuw-dock-occupied)::before {
+  content: 'мини';
+  font-size: 10px;
+  font-family: sans-serif;
+  letter-spacing: 0.04em;
+  opacity: 0.3;
+  transition: opacity 0.2s;
+}
+
+/* ── Theme variants ── */
+[id^="cuw-dock-"][data-cuw-theme="dark"] {
   color: #ccc;
   border-color: rgba(255, 255, 255, 0.12);
 }
-#cuw-dock-target[data-cuw-theme="light"] {
+[id^="cuw-dock-"][data-cuw-theme="light"] {
   color: #555;
   border-color: rgba(0, 0, 0, 0.14);
 }
 
-/* Drag is in progress — make the zone discoverable */
-#cuw-dock-target.cuw-dock-active {
+/* ── Visible when drag is in progress ── */
+[id^="cuw-dock-"].cuw-dock-dragging {
+  display: inline-flex;
+}
+
+/* ── Highlight during drag (active zone) ── */
+[id^="cuw-dock-"].cuw-dock-active {
   border-style: dashed;
   border-color: rgba(99, 170, 255, 0.55) !important;
   background: rgba(99, 170, 255, 0.07);
 }
-#cuw-dock-target.cuw-dock-active::before {
+[id^="cuw-dock-"].cuw-dock-active::before {
   opacity: 0.55;
   border-color: rgb(99, 170, 255);
 }
 
-/* Widget is hovering directly over the drop zone */
-#cuw-dock-target.cuw-dock-hover {
+/* ── Widget hovering directly over the slot ── */
+[id^="cuw-dock-"].cuw-dock-hover {
   border-color: rgba(99, 170, 255, 0.95) !important;
   background: rgba(99, 170, 255, 0.18);
   transform: scale(1.12);
 }
-#cuw-dock-target.cuw-dock-hover::before {
+[id^="cuw-dock-"].cuw-dock-hover::before {
   opacity: 0.85;
-  border-color: rgb(99, 170, 255);
+}
+#cuw-dock-chat-mini.cuw-dock-hover {
+  transform: scale(1.04); /* milder scale for wide element */
 }
 
-/* Widget is embedded — hide border and hint, show just the dot */
-#cuw-dock-target.cuw-dock-occupied {
+/* ── Widget is embedded — hide border, show content ── */
+[id^="cuw-dock-"].cuw-dock-occupied {
+  display: inline-flex;
   border-color: transparent !important;
   background: transparent;
   transform: none;
+  width: auto;
+  height: auto;
 }
 
 /* ════════════════ DOCKED WIDGET ════════════════ */
 
-/*
-  When the widget lives inside #cuw-dock-target it must behave as an inline
-  element, not a fixed overlay.
-*/
 #claude-usage-widget[data-cuw-docked="true"] {
   position: static !important;
   left:   auto !important;
@@ -340,8 +359,8 @@
   transition: none !important;
 }
 
-/* Compact dot button that fits the sidebar slot */
-#claude-usage-widget[data-cuw-docked="true"] .cuw-dot-btn {
+/* Dot button when docked as dot */
+#claude-usage-widget[data-cuw-docked="true"][data-cuw-dock-mode="dot"] .cuw-dot-btn {
   width: 32px;
   height: 32px;
   padding: 0;
@@ -349,17 +368,26 @@
   border-color: transparent;
   box-shadow: none;
   cursor: grab;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  transition: background 0.15s, transform 0.1s;
 }
-
-#claude-usage-widget[data-cuw-docked="true"] .cuw-dot-btn:hover {
+#claude-usage-widget[data-cuw-docked="true"][data-cuw-dock-mode="dot"] .cuw-dot-btn:hover {
   background: rgba(128, 128, 128, 0.12);
-  border-color: rgba(128, 128, 128, 0.22);
   box-shadow: none;
   transform: none;
 }
-
-#claude-usage-widget[data-cuw-docked="true"] .cuw-dot-btn:active {
+#claude-usage-widget[data-cuw-docked="true"][data-cuw-dock-mode="dot"] .cuw-dot-btn:active {
   cursor: grabbing;
   transform: scale(0.93);
+}
+
+/* Mini widget when docked as mini — compact, no decorations */
+#claude-usage-widget[data-cuw-docked="true"][data-cuw-dock-mode="mini"] .cuw-mini-inner {
+  cursor: grab;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  min-width: 140px;
+}
+#claude-usage-widget[data-cuw-docked="true"][data-cuw-dock-mode="mini"] .cuw-mini-inner:active {
+  cursor: grabbing;
 }
