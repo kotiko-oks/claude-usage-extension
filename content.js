@@ -296,13 +296,66 @@
 
   function injectChatDocks() {
     const wiggleDiv = document.querySelector('[data-testid="wiggle-controls-actions"]');
-    if (!wiggleDiv) return false;
 
-    // Left dot — first child of wiggleDiv
+    if (wiggleDiv) {
+      // ── chat view: wiggle-controls-actions bar ──
+      if (!document.getElementById('cuw-dock-chat-left')) {
+        const el = makeDockEl('cuw-dock-chat-left', 'dot');
+        el.title = 'Перетащите виджет сюда (точка)';
+        wiggleDiv.prepend(el);
+        allDockEls.push(el);
+        tryRestoreDock(el);
+      } else {
+        const ex = document.getElementById('cuw-dock-chat-left');
+        if (!allDockEls.includes(ex)) allDockEls.push(ex);
+      }
+
+      if (!document.getElementById('cuw-dock-chat-right')) {
+        const el = makeDockEl('cuw-dock-chat-right', 'dot');
+        el.title = 'Перетащите виджет сюда (точка)';
+        wiggleDiv.append(el);
+        allDockEls.push(el);
+        tryRestoreDock(el);
+      } else {
+        const ex = document.getElementById('cuw-dock-chat-right');
+        if (!allDockEls.includes(ex)) allDockEls.push(ex);
+      }
+
+      // Mini strip — absolutely positioned below wiggleDiv inside its parent
+      if (!document.getElementById('cuw-dock-chat-mini')) {
+        const parent = wiggleDiv.parentElement;
+        if (!parent) return true; // dots are done at least
+        const el = makeDockEl('cuw-dock-chat-mini', 'mini');
+        el.title = 'Перетащите виджет сюда (мини)';
+        // wiggleDiv is md:absolute md:top-0; h-12 = 48px, so top:48px places us right below
+        el.style.cssText = 'position:absolute;top:48px;right:0;';
+        // ensure parent is a positioned container
+        if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+        parent.appendChild(el);
+        allDockEls.push(el);
+        tryRestoreDock(el);
+      } else {
+        const ex = document.getElementById('cuw-dock-chat-mini');
+        if (!allDockEls.includes(ex)) allDockEls.push(ex);
+      }
+
+      return true;
+    }
+
+    // ── new-chat / other pages: fixed top-right header with incognito button ──
+    // Same dock IDs → localStorage restore works seamlessly across navigation.
+    const incognitoBtn = document.querySelector('[aria-label="Use incognito"]');
+    if (!incognitoBtn) return false;
+    // button → id-div → outer-div → div.fixed.draggable-none (flex row)
+    const fixedContainer = incognitoBtn.parentElement &&
+                           incognitoBtn.parentElement.parentElement &&
+                           incognitoBtn.parentElement.parentElement.parentElement;
+    if (!fixedContainer) return false;
+
     if (!document.getElementById('cuw-dock-chat-left')) {
       const el = makeDockEl('cuw-dock-chat-left', 'dot');
       el.title = 'Перетащите виджет сюда (точка)';
-      wiggleDiv.prepend(el);
+      fixedContainer.prepend(el);
       allDockEls.push(el);
       tryRestoreDock(el);
     } else {
@@ -310,11 +363,10 @@
       if (!allDockEls.includes(ex)) allDockEls.push(ex);
     }
 
-    // Right dot — last child of wiggleDiv
     if (!document.getElementById('cuw-dock-chat-right')) {
       const el = makeDockEl('cuw-dock-chat-right', 'dot');
       el.title = 'Перетащите виджет сюда (точка)';
-      wiggleDiv.append(el);
+      fixedContainer.append(el);
       allDockEls.push(el);
       tryRestoreDock(el);
     } else {
@@ -322,17 +374,12 @@
       if (!allDockEls.includes(ex)) allDockEls.push(ex);
     }
 
-    // Mini strip — absolutely positioned below wiggleDiv inside its parent
+    // Mini strip — below the fixed header (absolute inside fixed container)
     if (!document.getElementById('cuw-dock-chat-mini')) {
-      const parent = wiggleDiv.parentElement;
-      if (!parent) return true; // dots are done at least
       const el = makeDockEl('cuw-dock-chat-mini', 'mini');
       el.title = 'Перетащите виджет сюда (мини)';
-      // wiggleDiv is md:absolute md:top-0; h-12 = 48px, so top:48px places us right below
-      el.style.cssText = 'position:absolute;top:48px;right:0;';
-      // ensure parent is a positioned container
-      if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
-      parent.appendChild(el);
+      el.style.cssText = 'position:absolute;top:100%;right:0;margin-top:4px;';
+      fixedContainer.appendChild(el);
       allDockEls.push(el);
       tryRestoreDock(el);
     } else {
@@ -417,6 +464,9 @@
 
   function dockWidget(targetEl) {
     if (!targetEl || !widgetEl) return;
+    // Clear any temporary hiding applied during dock rescue
+    widgetEl.style.opacity = '';
+    widgetEl.style.pointerEvents = '';
     activeDockEl = targetEl;
     isDocked     = true;
     const mode   = targetEl.dataset.cuwDockMode || 'dot';
@@ -649,14 +699,26 @@
     if (missing.length) {
       // If widget was inside a removed dock, rescue it first
       if (missing.includes(activeDockEl) && widgetEl) {
+        // Rescue widget to body but KEEP DOCK_KEY so tryRestoreDock()
+        // can re-dock it once the target is re-injected by SPA re-render.
         document.body.appendChild(widgetEl);
         widgetEl.removeAttribute('data-cuw-docked');
         widgetEl.removeAttribute('data-cuw-dock-mode');
+        widgetEl.style.opacity = '0';
+        widgetEl.style.pointerEvents = 'none';
         activeDockEl = null;
         isDocked     = false;
-        try { localStorage.removeItem(DOCK_KEY); } catch (_) {}
-        applyEdgePosition(widgetEl, window.innerWidth - 80, window.innerHeight - 80);
         renderWidget();
+        // Fallback: if dock not restored in 2.5 s (target doesn't exist on
+        // this page, e.g. no Share button on /new), show widget floating.
+        setTimeout(function () {
+          if (!isDocked && widgetEl) {
+            widgetEl.style.opacity = '';
+            widgetEl.style.pointerEvents = '';
+            try { localStorage.removeItem(DOCK_KEY); } catch (_) {}
+            applyEdgePosition(widgetEl, window.innerWidth - 80, window.innerHeight - 80);
+          }
+        }, 2500);
       }
       allDockEls = allDockEls.filter(function (d) { return document.contains(d); });
       tryInjectAll();
